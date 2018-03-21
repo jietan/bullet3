@@ -6,6 +6,8 @@ import math
 import numpy as np
 from . import motor
 import os
+import pybullet as p
+from pybullet_utils import urdfEditor
 
 INIT_POSITION = [0, 0, .2]
 INIT_ORIENTATION = [0, 0, 0, 1]
@@ -44,6 +46,7 @@ class Minitaur(object):
                torque_control_enabled=False,
                motor_overheat_protection=False,
                on_rack=False,
+               com=0,
                kd_for_pd_controllers=0.3):
     """Constructs a minitaur and reset it to the initial states.
 
@@ -98,6 +101,18 @@ class Minitaur(object):
       self._kp = 1
       self._kd = 1
     self.time_step = time_step
+    urdf_path = "%s/quadruped/minitaur.urdf" % self._urdf_root
+    self._tmp_id = p.connect(p.DIRECT)
+    self.quadruped = p.loadURDF(
+      urdf_path,
+      flags=self._pybullet_client.URDF_USE_IMPLICIT_CYLINDER,
+      physicsClientId=self._tmp_id)
+    self._BuildJointNameToIdDict()
+    self._BuildMotorIdList()
+    self._urdf_parser = urdfEditor.UrdfEditor()
+    self._urdf_parser.initializeFromBulletBody(self.quadruped, physicsClientId=self._tmp_id)
+    base = self._urdf_parser.urdfLinks[0]
+    base.urdf_inertial.origin_xyz = [com, 0, 0]
     self.Reset()
 
   def _RecordMassInfoFromURDF(self):
@@ -112,11 +127,12 @@ class Minitaur(object):
             0])
 
   def _BuildJointNameToIdDict(self):
-    num_joints = self._pybullet_client.getNumJoints(self.quadruped)
+    num_joints = p.getNumJoints(self.quadruped, physicsClientId=self._tmp_id)
     self._joint_name_to_id = {}
     for i in range(num_joints):
-      joint_info = self._pybullet_client.getJointInfo(self.quadruped, i)
+      joint_info = p.getJointInfo(self.quadruped, i, physicsClientId=self._tmp_id)
       self._joint_name_to_id[joint_info[1].decode("UTF-8")] = joint_info[0]
+    print self._joint_name_to_id
 
   def _BuildMotorIdList(self):
     self._motor_id_list = [
@@ -130,17 +146,21 @@ class Minitaur(object):
       reload_urdf: Whether to reload the urdf file. If not, Reset() just place
         the minitaur back to its starting position.
     """
+
     if reload_urdf:
-      if self._self_collision_enabled:
-        self.quadruped = self._pybullet_client.loadURDF(
-            "%s/quadruped/minitaur.urdf" % self._urdf_root,
-            INIT_POSITION,
-            flags=self._pybullet_client.URDF_USE_SELF_COLLISION)
-      else:
-        self.quadruped = self._pybullet_client.loadURDF(
-            "%s/quadruped/minitaur.urdf" % self._urdf_root, INIT_POSITION)
-      self._BuildJointNameToIdDict()
-      self._BuildMotorIdList()
+#       if self._self_collision_enabled:
+#         self.quadruped = self._pybullet_client.loadURDF(
+#             "%s/quadruped/minitaur.urdf" % self._urdf_root,
+#             INIT_POSITION,
+#             flags=self._pybullet_client.URDF_USE_SELF_COLLISION)
+#       else:
+#         self.quadruped = self._pybullet_client.loadURDF(
+#             "%s/quadruped/minitaur.urdf" % self._urdf_root, INIT_POSITION)
+#      self._urdf_parser.createMultiBody(basePosition=[1, 0, 1])
+      self.quadruped = self._urdf_parser.createMultiBody(
+        physicsClientId=self._pybullet_client._client,
+        basePosition=INIT_POSITION)
+
       self._RecordMassInfoFromURDF()
       self.ResetPose(add_constraint=True)
       if self._on_rack:

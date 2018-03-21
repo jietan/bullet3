@@ -15,6 +15,7 @@ from gym import spaces
 from gym.utils import seeding
 import numpy as np
 import pybullet
+print(pybullet.__file__)
 from . import bullet_client
 from . import minitaur
 import os
@@ -69,6 +70,7 @@ class MinitaurBulletEnv(gym.Env):
                hard_reset=True,
                on_rack=False,
                render=False,
+               com=0,
                kd_for_pd_controllers=0.3,
                env_randomizer=minitaur_env_randomizer.MinitaurEnvRandomizer()):
     """Initialize the minitaur gym environment.
@@ -107,6 +109,7 @@ class MinitaurBulletEnv(gym.Env):
       env_randomizer: An EnvRandomizer to randomize the physical properties
         during reset().
     """
+    self._com = com
     self._time_step = 0.01
     self._action_repeat = action_repeat
     self._num_bullet_solver_iterations = 300
@@ -186,6 +189,7 @@ class MinitaurBulletEnv(gym.Env):
           urdf_root=self._urdf_root,
           time_step=self._time_step,
           self_collision_enabled=self._self_collision_enabled,
+          com=self._com,
           motor_velocity_limit=self._motor_velocity_limit,
           pd_control_enabled=self._pd_control_enabled,
           accurate_motor_model_enabled=acc_motor,
@@ -252,8 +256,8 @@ class MinitaurBulletEnv(gym.Env):
       if time_to_sleep > 0:
         time.sleep(time_to_sleep)
       base_pos = self.minitaur.GetBasePosition()
-      self._pybullet_client.resetDebugVisualizerCamera(
-          self._cam_dist, self._cam_yaw, self._cam_pitch, base_pos)
+#      self._pybullet_client.resetDebugVisualizerCamera(
+#          self._cam_dist, self._cam_yaw, self._cam_pitch, base_pos)
     action = self._transform_action_to_motor_command(action)
     for _ in range(self._action_repeat):
       self.minitaur.ApplyAction(action)
