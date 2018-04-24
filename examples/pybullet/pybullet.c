@@ -1909,6 +1909,7 @@ static PyObject* pybullet_setJointMotorControlArray(PyObject* self, PyObject* ar
 				{
 					Py_DECREF(kpsSeq);
 				}
+				
 				PyErr_SetString(SpamError, "number of kds should match the number of joint indices");
 				return NULL;
 			}
@@ -1993,6 +1994,29 @@ static PyObject* pybullet_setJointMotorControlArray(PyObject* self, PyObject* ar
 
 
 		statusHandle = b3SubmitClientCommandAndWaitStatus(sm, commandHandle);
+
+		if (targetVelocitiesSeq)
+		{
+			Py_DECREF(targetVelocitiesSeq);
+		}
+		if (targetPositionsSeq)
+		{
+			Py_DECREF(targetPositionsSeq);
+		}
+		if (forcesSeq)
+		{
+			Py_DECREF(forcesSeq);
+		}
+		if (kpsSeq)
+		{
+			Py_DECREF(kpsSeq);
+		}
+
+		if (kdsSeq)
+		{
+			Py_DECREF(kdsSeq);
+		}
+
 		Py_DECREF(jointIndicesSeq);
 		Py_INCREF(Py_None);
 		return Py_None;
@@ -6761,10 +6785,12 @@ static PyObject* pybullet_getCameraImage(PyObject* self, PyObject* args, PyObjec
 {
 	/// request an image from a simulated camera, using software or hardware renderer.
 	struct b3CameraImageData imageData;
-	PyObject *objViewMat = 0, *objProjMat = 0, *lightDirObj = 0, *lightColorObj = 0;
+	PyObject *objViewMat = 0, *objProjMat = 0, *lightDirObj = 0, *lightColorObj = 0, *objProjectiveTextureView = 0, *objProjectiveTextureProj = 0;
 	int width, height;
 	float viewMatrix[16];
 	float projectionMatrix[16];
+	float projectiveTextureView[16];
+	float projectiveTextureProj[16];
 	float lightDir[3];
 	float lightColor[3];
 	float lightDist = -1;
@@ -6779,9 +6805,9 @@ static PyObject* pybullet_getCameraImage(PyObject* self, PyObject* args, PyObjec
 	int physicsClientId = 0;
 	b3PhysicsClientHandle sm = 0;
 	// set camera resolution, optionally view, projection matrix, light direction, light color, light distance, shadow
-	static char* kwlist[] = {"width", "height", "viewMatrix", "projectionMatrix", "lightDirection", "lightColor", "lightDistance", "shadow", "lightAmbientCoeff", "lightDiffuseCoeff", "lightSpecularCoeff", "renderer", "flags", "physicsClientId", NULL};
+	static char* kwlist[] = {"width", "height", "viewMatrix", "projectionMatrix", "lightDirection", "lightColor", "lightDistance", "shadow", "lightAmbientCoeff", "lightDiffuseCoeff", "lightSpecularCoeff", "renderer", "flags", "projectiveTextureView", "projectiveTextureProj", "physicsClientId", NULL};
 
-	if (!PyArg_ParseTupleAndKeywords(args, keywds, "ii|OOOOfifffiii", kwlist, &width, &height, &objViewMat, &objProjMat, &lightDirObj, &lightColorObj, &lightDist, &hasShadow, &lightAmbientCoeff, &lightDiffuseCoeff, &lightSpecularCoeff, &renderer, &flags, &physicsClientId))
+	if (!PyArg_ParseTupleAndKeywords(args, keywds, "ii|OOOOfifffiiOOi", kwlist, &width, &height, &objViewMat, &objProjMat, &lightDirObj, &lightColorObj, &lightDist, &hasShadow, &lightAmbientCoeff, &lightDiffuseCoeff, &lightSpecularCoeff, &renderer, &flags, &objProjectiveTextureView, &objProjectiveTextureProj, &physicsClientId))
 	{
 		return NULL;
 	}
@@ -6836,6 +6862,10 @@ static PyObject* pybullet_getCameraImage(PyObject* self, PyObject* args, PyObjec
 	if (flags >= 0)
 	{
 		b3RequestCameraImageSetFlags(command, flags);
+	}
+	if (objProjectiveTextureView && objProjectiveTextureProj && pybullet_internalSetMatrix(objProjectiveTextureView, projectiveTextureView) && (pybullet_internalSetMatrix(objProjectiveTextureProj, projectiveTextureProj)))
+	{
+		b3RequestCameraImageSetProjectiveTextureMatrices(command, projectiveTextureView, projectiveTextureProj);
 	}
 	if (renderer>=0)
 	{
@@ -8326,10 +8356,48 @@ static PyObject* pybullet_calculateJacobian(PyObject* self, PyObject* args, PyOb
 			int szObVel = PySequence_Size(objVelocities);
 			int szObAcc = PySequence_Size(objAccelerations);
 			int numJoints = b3GetNumJoints(sm, bodyUniqueId);
-			if (numJoints && (szLoPos == 3) && (szObPos == numJoints) && 
-				(szObVel == numJoints) && (szObAcc == numJoints))
+
+			int j=0;
+			int dofCountOrg = 0;
+			for (j=0;j<numJoints;j++)
 			{
-				int byteSizeJoints = sizeof(double) * numJoints;
+				struct b3JointInfo info;
+				b3GetJointInfo(sm, bodyUniqueId, j, &info);
+				switch (info.m_jointType)
+				{
+				case eRevoluteType:
+					{
+						dofCountOrg+=1;
+						break;
+					}
+				case ePrismaticType:
+					{
+						dofCountOrg+=1;
+						break;
+					}
+				case eSphericalType:
+					{
+						PyErr_SetString(SpamError,
+								"Spherirical joints are not supported in the pybullet binding");
+						return NULL;
+					}
+				case ePlanarType:
+					{
+						PyErr_SetString(SpamError,
+								"Planar joints are not supported in the pybullet binding");
+						return NULL;
+					}
+					default:
+					{
+						//fixed joint has 0-dof and at the moment, we don't deal with planar, spherical etc
+					}
+				}
+			}
+
+			if (dofCountOrg && (szLoPos == 3) && (szObPos == dofCountOrg) &&
+				(szObVel == dofCountOrg) && (szObAcc == dofCountOrg))
+			{
+				int byteSizeJoints = sizeof(double) * dofCountOrg;
 				int byteSizeVec3 =  sizeof(double) * 3;
 				int i;
 				PyObject* pyResultList = PyTuple_New(2);
@@ -8341,7 +8409,7 @@ static PyObject* pybullet_calculateJacobian(PyObject* self, PyObject* args, PyOb
 				double* angularJacobian = NULL;
 
 				pybullet_internalSetVectord(localPosition, localPoint);
-				for (i = 0; i < numJoints; i++)
+				for (i = 0; i < dofCountOrg; i++)
 				{
 					jointPositions[i] =
 						pybullet_internalGetFloatFromSequence(objPositions, i);
@@ -8423,11 +8491,11 @@ static PyObject* pybullet_calculateJacobian(PyObject* self, PyObject* args, PyOb
 			else
 			{
 				PyErr_SetString(SpamError,
-								"calculateJacobian [numJoints] needs to be "
+								"calculateJacobian [numDof] needs to be "
 								"positive, [local position] needs to be of "
 								"size 3 and [joint positions], "
 								"[joint velocities], [joint accelerations] "
-								"need to match the number of joints.");
+								"need to match the number of DoF.");
 				return NULL;
 			}
 		}
@@ -9108,10 +9176,13 @@ initpybullet(void)
 	PyModule_AddIntConstant(m, "COV_ENABLE_RGB_BUFFER_PREVIEW", COV_ENABLE_RGB_BUFFER_PREVIEW);
 	PyModule_AddIntConstant(m, "COV_ENABLE_DEPTH_BUFFER_PREVIEW", COV_ENABLE_DEPTH_BUFFER_PREVIEW);
 	PyModule_AddIntConstant(m, "COV_ENABLE_SEGMENTATION_MARK_PREVIEW", COV_ENABLE_SEGMENTATION_MARK_PREVIEW);
+	PyModule_AddIntConstant(m, "COV_ENABLE_PLANAR_REFLECTION", COV_ENABLE_PLANAR_REFLECTION);
+
 
 	PyModule_AddIntConstant(m, "ER_TINY_RENDERER", ER_TINY_RENDERER);
 	PyModule_AddIntConstant(m, "ER_BULLET_HARDWARE_OPENGL", ER_BULLET_HARDWARE_OPENGL);
 	PyModule_AddIntConstant(m, "ER_SEGMENTATION_MASK_OBJECT_AND_LINKINDEX", ER_SEGMENTATION_MASK_OBJECT_AND_LINKINDEX);
+	PyModule_AddIntConstant(m, "ER_USE_PROJECTIVE_TEXTURE", ER_USE_PROJECTIVE_TEXTURE);
 
 	PyModule_AddIntConstant(m, "IK_DLS", IK_DLS);
 	PyModule_AddIntConstant(m, "IK_SDLS", IK_SDLS);
